@@ -1,36 +1,52 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# PutUp — AI Invoice Scanner & GST Compiler
 
-## Getting Started
+**PutUp** is a Next.js web application that parses uploaded invoices (PDFs, JPEGs, PNGs) using Gemini 3.5 Flash, extracts metadata, groups individual line items by their GST rate subtotal breakdowns, and compiles them into a ledger view. It allows manual editing in the UI (with live tax recalculation) and exports the data to a multi-sheet Excel file (.xlsx) using SheetJS.
 
-First, run the development server:
+## Features
+- **Multimodal AI Extraction:** Drag-and-drop batch upload files to process concurrently using Gemini 3.5 Flash.
+- **GST Grouping:** Line items are grouped and subtotaled by their GST percentage rate (0%, 5%, 12%, 18%, 28%) and aggregated.
+- **In-App Spreadsheet Ledger:** Rendered as an expandable table showing subtotal, tax amount, and grand totals.
+- **Editable Detail Panel:** Adjust names, GSTINs, and individual item parameters directly, which automatically triggers real-time tax recalculations.
+- **Excel Export:** Download report as formatted `.xlsx` containing an "Invoices Summary" sheet and a "GST Rate Breakdown" detail sheet.
+- **Mock Demo Mode:** Load sample invoices immediately to test features without any configuration.
+- **Fail-safe API Keys:** Set keys via `.env.local` or override them securely via the in-app settings modal.
 
+---
+
+## Quick Start
+
+### 1. Configure the Gemini API Key
+Create a `.env.local` file in the root folder (or modify the template) and enter your API Key:
+```env
+GEMINI_API_KEY=AIzaSy...
+```
+*Note: Alternatively, you can click "Configure Gemini Key" on the dashboard to store it locally in your browser's localStorage, keeping your developer environment clean.*
+
+### 2. Install Dependencies
+Ensure you have Node.js (v18+) installed. Run:
 ```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
+npm install
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+### 3. Run the Development Server
+Launch the development server:
+```bash
+npm run dev
+```
+Open [http://localhost:3000](http://localhost:3000) in your browser to view the application.
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+---
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+## Technical Information
 
-## Learn More
+### Run Unit Tests
+We use Vitest to run unit tests verifying the GST rounding, subtotaling, and confidence checks:
+```bash
+npx vitest run
+```
 
-To learn more about Next.js, take a look at the following resources:
-
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
-
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
-
-## Deploy on Vercel
-
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
-
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+### Build for Production
+To generate a production-ready compiled Next.js build:
+```bash
+npm run build
+```
