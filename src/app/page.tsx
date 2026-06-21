@@ -4,7 +4,8 @@ import React, { useState, useEffect, useRef } from 'react';
 import { 
   UploadCloud, FileText, Trash2, Download, ChevronDown, ChevronUp, 
   CheckCircle, AlertTriangle, FileSpreadsheet, Plus, Edit2, Save, 
-  X, RefreshCw, Key, AlertCircle, HelpCircle, Check, Database, Trash
+  X, RefreshCw, Key, AlertCircle, HelpCircle, Check, Database, Trash,
+  LogOut
 } from 'lucide-react';
 import { Invoice, RawInvoice, GstGroup, compileInvoice, roundTo2, RawLineItem } from '@/lib/gst-utils';
 import { exportInvoicesToExcel } from '@/lib/excel-export';
@@ -19,6 +20,25 @@ export default function Home() {
   const [tempApiKey, setTempApiKey] = useState<string>('');
   const [isDragging, setIsDragging] = useState<boolean>(false);
   const [apiErrorMessage, setApiErrorMessage] = useState<string | null>(null);
+  const [selectedModel, setSelectedModel] = useState<string>('gemini-3.5-flash');
+
+  // Sorting State
+  const [sortField, setSortField] = useState<string>('createdAt');
+  const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('desc');
+
+  // Column Visibility State
+  const [visibleColumns, setVisibleColumns] = useState({
+    vendorName: true,
+    gstNumber: true,
+    customerName: true,
+    taxableSubtotal: true,
+    totalGst: true,
+    total: true,
+    confidenceStatus: true,
+    createdAt: true,
+  });
+
+  const [showColumnDropdown, setShowColumnDropdown] = useState<boolean>(false);
   
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -32,36 +52,42 @@ export default function Home() {
         console.error('Failed to parse saved invoices:', e);
       }
     }
+
+    const savedModel = localStorage.getItem('putup_selected_model');
+    if (savedModel) {
+      setSelectedModel(savedModel);
+    }
     
     // Check if key is configured (either in env or local storage as fallback for ease of testing)
     checkApiKeyStatus();
   }, []);
 
+  const handleModelChange = (model: string) => {
+    setSelectedModel(model);
+    localStorage.setItem('putup_selected_model', model);
+  };
+
   const checkApiKeyStatus = async () => {
-    // We will do a quick check if server has the API key
     try {
-      const res = await fetch('/api/extract', { method: 'HEAD' }); // Simple head request to verify
-      // In Next.js, we can also check if the user has stored a client-side override in localStorage
+      // In Next.js, we check if the user has stored a client-side override in localStorage
       const localKey = localStorage.getItem('GEMINI_API_KEY');
-      
       if (localKey) {
         setApiKeySet(true);
+        return;
+      }
+
+      // Check if server environment has the API key
+      const response = await fetch('/api/extract');
+      const data = await response.json();
+      if (data.configured) {
+        setApiKeySet(true);
       } else {
-        // We will ping a config endpoint or check response headers/status of a dummy call
-        const response = await fetch('/api/extract', {
-          method: 'POST',
-          body: new FormData() // Empty form data will fail with "No file uploaded" (400) or API Key error (400)
-        });
-        const data = await response.json();
-        if (data.error && data.error.includes('API Key is not configured')) {
-          setApiKeySet(false);
-          setShowApiKeyPrompt(true);
-        } else {
-          setApiKeySet(true);
-        }
+        setApiKeySet(false);
+        setShowApiKeyPrompt(true);
       }
     } catch (e) {
       setApiKeySet(false);
+      setShowApiKeyPrompt(true);
     }
   };
 
@@ -76,11 +102,62 @@ export default function Home() {
     }
   };
 
-  const handleClearApiKey = () => {
-    localStorage.removeItem('GEMINI_API_KEY');
-    setApiKeySet(false);
-    setTempApiKey('');
+  const handleOpenApiKeySettings = () => {
+    const savedKey = localStorage.getItem('GEMINI_API_KEY') || '';
+    setTempApiKey(savedKey);
     setShowApiKeyPrompt(true);
+  };
+
+  const handleClearApiKey = () => {
+    if (confirm('Are you sure you want to delete the saved Gemini API Key?')) {
+      localStorage.removeItem('GEMINI_API_KEY');
+      setApiKeySet(false);
+      setTempApiKey('');
+      setShowApiKeyPrompt(false);
+      window.location.reload();
+    }
+  };
+
+  // Sorting and Column Utilities
+  const handleSort = (field: string) => {
+    if (sortField === field) {
+      setSortOrder(sortOrder === 'asc' ? 'desc' : 'asc');
+    } else {
+      setSortField(field);
+      setSortOrder('asc');
+    }
+  };
+
+  const getSortedInvoices = () => {
+    return [...invoices].sort((a, b) => {
+      let valA: any = a[sortField as keyof Invoice];
+      let valB: any = b[sortField as keyof Invoice];
+
+      if (sortField === 'taxableSubtotal') {
+        valA = a.total - a.totalGst;
+        valB = b.total - b.totalGst;
+      }
+
+      if (valA === null || valA === undefined) return sortOrder === 'asc' ? 1 : -1;
+      if (valB === null || valB === undefined) return sortOrder === 'asc' ? -1 : 1;
+
+      if (typeof valA === 'string' && typeof valB === 'string') {
+        return sortOrder === 'asc' 
+          ? valA.localeCompare(valB) 
+          : valB.localeCompare(valA);
+      }
+
+      return sortOrder === 'asc' ? valA - valB : valB - valA;
+    });
+  };
+
+  const renderSortIcon = (field: string) => {
+    if (sortField !== field) {
+      return <span className="opacity-30 text-[9px] font-mono select-none">⇅</span>;
+    }
+    return sortOrder === 'asc' 
+      ? <span className="text-indigo-400 text-[10px] select-none">▲</span>
+      : <span className="text-indigo-400 text-[10px] select-none">▼</span>;
   };
 
   // Save invoices to local storage whenever they change
@@ -164,15 +241,15 @@ export default function Home() {
     formData.append('file', file);
 
     try {
-      // Add custom headers if API Key is set in local storage
+      // Add custom headers if API Key or Model selection is set
       const headers: Record<string, string> = {};
       const localKey = localStorage.getItem('GEMINI_API_KEY');
       
-      // We will proxy the call. If client key is set, we will append it in header or we will handle it in API
-      // Since Next.js runs both, let's pass a header 'x-gemini-key' if it exists.
-      // We will adjust our API route later to read from header if not in env! (Excellent for ease of setup!)
       if (localKey) {
         headers['x-gemini-key'] = localKey;
+      }
+      if (selectedModel) {
+        headers['x-gemini-model'] = selectedModel;
       }
 
       setUploadQueue(prev => prev.map(item => item.id === queueId ? { ...item, progress: 60 } : item));
@@ -289,6 +366,7 @@ export default function Home() {
     e.stopPropagation();
     // Clone invoice to avoid mutating state directly
     setEditingInvoice(JSON.parse(JSON.stringify(invoice)));
+    setExpandedInvoiceId(invoice.id);
   };
 
   const handleHeaderChange = (field: keyof Invoice, value: string | null) => {
@@ -411,6 +489,16 @@ export default function Home() {
           <div className="bg-slate-900 border border-slate-800 rounded-2xl w-full max-w-md p-6 shadow-2xl relative overflow-hidden">
             <div className="absolute top-0 left-0 right-0 h-1.5 bg-gradient-to-r from-indigo-500 via-purple-500 to-pink-500" />
             
+            {apiKeySet && (
+              <button 
+                onClick={() => setShowApiKeyPrompt(false)} 
+                className="absolute top-4 right-4 text-slate-500 hover:text-slate-300 p-1 hover:bg-slate-800 rounded-lg transition-all"
+                title="Close"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            )}
+
             <div className="flex items-center space-x-3 mb-4">
               <div className="p-2 bg-indigo-500/10 text-indigo-400 rounded-lg">
                 <Key className="w-5 h-5" />
@@ -437,19 +525,32 @@ export default function Home() {
               </span>
             </div>
 
-            <div className="flex gap-3 justify-end">
-              <button 
-                onClick={() => setShowApiKeyPrompt(false)} 
-                className="px-4 py-2 text-sm text-slate-400 hover:text-slate-200 hover:bg-slate-800 rounded-xl transition-all"
-              >
-                Skip / Demo Mode
-              </button>
-              <button 
-                onClick={handleSaveApiKey}
-                className="px-5 py-2.5 text-sm bg-gradient-to-r from-indigo-500 to-purple-600 hover:from-indigo-600 hover:to-purple-700 text-white font-medium rounded-xl shadow-lg shadow-indigo-500/25 transition-all"
-              >
-                Save API Key
-              </button>
+            <div className="flex gap-3 justify-between items-center">
+              {apiKeySet ? (
+                <button 
+                  onClick={handleClearApiKey}
+                  className="px-3 py-2 text-xs font-semibold text-rose-400 hover:text-rose-300 hover:bg-rose-500/10 rounded-xl transition-all"
+                >
+                  Delete Key
+                </button>
+              ) : (
+                <div />
+              )}
+
+              <div className="flex gap-3">
+                <button 
+                  onClick={() => setShowApiKeyPrompt(false)} 
+                  className="px-4 py-2 text-sm text-slate-400 hover:text-slate-200 hover:bg-slate-800 rounded-xl transition-all"
+                >
+                  {apiKeySet ? 'Cancel' : 'Skip / Demo Mode'}
+                </button>
+                <button 
+                  onClick={handleSaveApiKey}
+                  className="px-5 py-2.5 text-sm bg-gradient-to-r from-indigo-500 to-purple-600 hover:from-indigo-600 hover:to-purple-700 text-white font-medium rounded-xl shadow-lg shadow-indigo-500/25 transition-all"
+                >
+                  Save API Key
+                </button>
+              </div>
             </div>
           </div>
         </div>
@@ -480,6 +581,16 @@ export default function Home() {
           </div>
 
           <div className="flex items-center gap-3">
+            <select 
+              value={selectedModel}
+              onChange={(e) => handleModelChange(e.target.value)}
+              className="bg-slate-900 border border-slate-800 rounded-xl px-3 py-2 text-xs font-semibold text-slate-300 hover:bg-slate-800 focus:outline-none focus:border-indigo-500 cursor-pointer transition-all"
+              title="Select Gemini Extraction Model"
+            >
+              <option value="gemini-3.5-flash">⚡ Fast (3.5 Flash)</option>
+              <option value="gemini-1.5-pro">🎯 Accurate (1.5 Pro)</option>
+            </select>
+
             <button 
               onClick={loadMockInvoices}
               className="px-4 py-2 text-xs font-semibold bg-slate-900 border border-slate-800 hover:bg-slate-800 text-slate-300 rounded-xl transition-all flex items-center gap-1.5"
@@ -492,8 +603,8 @@ export default function Home() {
                 <div className="w-2 h-2 bg-teal-500 rounded-full animate-pulse" />
                 <span className="text-xs text-slate-300 font-medium">Gemini Connected</span>
                 <button 
-                  onClick={handleClearApiKey}
-                  className="text-xs text-slate-500 hover:text-rose-400 font-semibold ml-2 border-l border-slate-800 pl-2 transition-colors"
+                  onClick={handleOpenApiKeySettings}
+                  className="text-xs text-slate-500 hover:text-indigo-400 font-semibold ml-2 border-l border-slate-800 pl-2 transition-colors"
                 >
                   Change Key
                 </button>
@@ -506,6 +617,16 @@ export default function Home() {
                 <Key className="w-3.5 h-3.5" /> Configure Gemini Key
               </button>
             )}
+
+            <form action="/api/logout" method="POST" className="inline-block">
+              <button 
+                type="submit"
+                className="px-4 py-2 text-xs font-semibold bg-slate-900 border border-slate-800 hover:bg-slate-850 hover:border-slate-700 hover:text-rose-400 text-slate-400 rounded-xl transition-all flex items-center gap-1.5"
+                title="Sign out of PutUp"
+              >
+                <LogOut className="w-3.5 h-3.5" /> Log Out
+              </button>
+            </form>
           </div>
         </header>
 
@@ -655,9 +776,48 @@ export default function Home() {
               <p className="text-slate-400 text-xs mt-0.5">Click any row to view full items breakdown and edit metadata</p>
             </div>
             
-            <div className="flex gap-2">
+            <div className="flex gap-2 relative">
               {invoices.length > 0 && (
                 <>
+                  <div className="relative">
+                    <button 
+                      onClick={() => setShowColumnDropdown(!showColumnDropdown)}
+                      className="px-4 py-2 text-xs font-semibold bg-slate-900 border border-slate-800 hover:bg-slate-800 text-slate-300 rounded-xl transition-all flex items-center gap-1.5"
+                    >
+                      Columns <ChevronDown className="w-3.5 h-3.5" />
+                    </button>
+                    {showColumnDropdown && (
+                      <div className="absolute right-0 mt-2 z-30 w-48 bg-slate-900 border border-slate-800 rounded-xl p-3 shadow-2xl space-y-2 select-none">
+                        <p className="text-[10px] font-bold text-slate-500 uppercase tracking-wider border-b border-slate-850 pb-1 mb-1">Show Columns</p>
+                        {Object.keys(visibleColumns).map((col) => {
+                          const labelMap: Record<string, string> = {
+                            vendorName: 'Vendor Name',
+                            gstNumber: 'Vendor GSTIN',
+                            customerName: 'Customer Name',
+                            taxableSubtotal: 'Taxable Subtotal',
+                            totalGst: 'Total GST',
+                            total: 'Grand Total',
+                            confidenceStatus: 'Confidence Status',
+                            createdAt: 'Date Scanned',
+                          };
+                          return (
+                            <label key={col} className="flex items-center gap-2 text-xs text-slate-300 cursor-pointer hover:text-slate-100 py-0.5">
+                              <input 
+                                type="checkbox" 
+                                checked={visibleColumns[col as keyof typeof visibleColumns]}
+                                onChange={() => setVisibleColumns({
+                                  ...visibleColumns,
+                                  [col]: !visibleColumns[col as keyof typeof visibleColumns]
+                                })}
+                                className="rounded border-slate-800 bg-slate-950 text-indigo-500 focus:ring-indigo-500 w-3.5 h-3.5"
+                              />
+                              {labelMap[col]}
+                            </label>
+                          );
+                        })}
+                      </div>
+                    )}
+                  </div>
                   <button 
                     onClick={() => {
                       if (confirm('Clear entire history? This cannot be undone.')) {
@@ -695,19 +855,93 @@ export default function Home() {
             <div className="overflow-x-auto">
               <table className="w-full text-left border-collapse">
                 <thead>
-                  <tr className="bg-slate-900/60 border-b border-slate-900 text-[11px] font-semibold text-slate-400 uppercase tracking-wider">
-                    <th className="py-4 px-6">Vendor Name</th>
-                    <th className="py-4 px-4">Vendor GSTIN</th>
-                    <th className="py-4 px-4">Customer Name</th>
-                    <th className="py-4 px-4 text-right">Taxable Subtotal</th>
-                    <th className="py-4 px-4 text-right">Total GST</th>
-                    <th className="py-4 px-4 text-right">Grand Total</th>
-                    <th className="py-4 px-4 text-center">Status</th>
+                  <tr className="bg-slate-900/60 border-b border-slate-900 text-[11px] font-semibold text-slate-400 uppercase tracking-wider select-none">
+                    <th className="py-4 px-4 text-center w-14">S.No.</th>
+                    {visibleColumns.vendorName && (
+                      <th 
+                        className="py-4 px-6 cursor-pointer hover:text-indigo-400 transition-colors"
+                        onClick={() => handleSort('vendorName')}
+                      >
+                        <div className="flex items-center gap-1">
+                          Vendor Name {renderSortIcon('vendorName')}
+                        </div>
+                      </th>
+                    )}
+                    {visibleColumns.gstNumber && (
+                      <th 
+                        className="py-4 px-4 cursor-pointer hover:text-indigo-400 transition-colors"
+                        onClick={() => handleSort('gstNumber')}
+                      >
+                        <div className="flex items-center gap-1">
+                          Vendor GSTIN {renderSortIcon('gstNumber')}
+                        </div>
+                      </th>
+                    )}
+                    {visibleColumns.customerName && (
+                      <th 
+                        className="py-4 px-4 cursor-pointer hover:text-indigo-400 transition-colors"
+                        onClick={() => handleSort('customerName')}
+                      >
+                        <div className="flex items-center gap-1">
+                          Customer Name {renderSortIcon('customerName')}
+                        </div>
+                      </th>
+                    )}
+                    {visibleColumns.taxableSubtotal && (
+                      <th 
+                        className="py-4 px-4 cursor-pointer hover:text-indigo-400 transition-colors text-right"
+                        onClick={() => handleSort('taxableSubtotal')}
+                      >
+                        <div className="flex items-center justify-end gap-1">
+                          Taxable Subtotal {renderSortIcon('taxableSubtotal')}
+                        </div>
+                      </th>
+                    )}
+                    {visibleColumns.totalGst && (
+                      <th 
+                        className="py-4 px-4 cursor-pointer hover:text-indigo-400 transition-colors text-right"
+                        onClick={() => handleSort('totalGst')}
+                      >
+                        <div className="flex items-center justify-end gap-1">
+                          Total GST {renderSortIcon('totalGst')}
+                        </div>
+                      </th>
+                    )}
+                    {visibleColumns.total && (
+                      <th 
+                        className="py-4 px-4 cursor-pointer hover:text-indigo-400 transition-colors text-right"
+                        onClick={() => handleSort('total')}
+                      >
+                        <div className="flex items-center justify-end gap-1">
+                          Grand Total {renderSortIcon('total')}
+                        </div>
+                      </th>
+                    )}
+                    {visibleColumns.confidenceStatus && (
+                      <th 
+                        className="py-4 px-4 cursor-pointer hover:text-indigo-400 transition-colors text-center"
+                        onClick={() => handleSort('confidenceStatus')}
+                      >
+                        <div className="flex items-center justify-center gap-1">
+                          Status {renderSortIcon('confidenceStatus')}
+                        </div>
+                      </th>
+                    )}
+                    {visibleColumns.createdAt && (
+                      <th 
+                        className="py-4 px-4 cursor-pointer hover:text-indigo-400 transition-colors text-center"
+                        onClick={() => handleSort('createdAt')}
+                      >
+                        <div className="flex items-center justify-center gap-1">
+                          Scan Date {renderSortIcon('createdAt')}
+                        </div>
+                      </th>
+                    )}
                     <th className="py-4 px-6 text-center">Actions</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-900 text-sm">
-                  {invoices.map((invoice) => {
+                  {getSortedInvoices().map((invoice, index) => {
                     const isExpanded = expandedInvoiceId === invoice.id;
                     const isEditing = editingInvoice?.id === invoice.id;
                     const hasLowConfidence = invoice.confidenceStatus === 'low_confidence';
@@ -725,43 +959,69 @@ export default function Home() {
                             isExpanded ? 'bg-slate-900/30' : ''
                           }`}
                         >
-                          <td className="py-4 px-6 font-semibold text-white max-w-[200px] truncate">
-                            {invoice.vendorName || (
-                              <span className="text-rose-400/80 italic flex items-center gap-1 text-xs">
-                                <AlertTriangle className="w-3.5 h-3.5" /> Missing Vendor
-                              </span>
-                            )}
+                          <td className="py-4 px-4 text-center text-slate-400 font-mono text-xs">
+                            {index + 1}
                           </td>
-                          <td className="py-4 px-4 font-mono text-xs text-slate-300">
-                            {invoice.gstNumber || (
-                              <span className="text-rose-400/80 italic flex items-center gap-1 text-xs font-sans">
-                                <AlertTriangle className="w-3.5 h-3.5" /> Missing GSTIN
-                              </span>
-                            )}
-                          </td>
-                          <td className="py-4 px-4 text-slate-300 max-w-[150px] truncate">
-                            {invoice.customerName || <span className="text-slate-500 italic text-xs">N/A</span>}
-                          </td>
-                          <td className="py-4 px-4 text-right font-medium text-slate-300">
-                            ₹{(invoice.total - invoice.totalGst).toLocaleString('en-IN', { minimumFractionDigits: 2 })}
-                          </td>
-                          <td className="py-4 px-4 text-right font-medium text-indigo-400">
-                            ₹{invoice.totalGst.toLocaleString('en-IN', { minimumFractionDigits: 2 })}
-                          </td>
-                          <td className="py-4 px-4 text-right font-bold text-teal-400">
-                            ₹{invoice.total.toLocaleString('en-IN', { minimumFractionDigits: 2 })}
-                          </td>
-                          <td className="py-4 px-4 text-center">
-                            {hasLowConfidence ? (
-                              <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-amber-500/10 text-amber-400 border border-amber-500/20">
-                                <AlertCircle className="w-3 h-3" /> Review
-                              </span>
-                            ) : (
-                              <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-teal-500/10 text-teal-400 border border-teal-500/20">
-                                <CheckCircle className="w-3 h-3" /> Confident
-                              </span>
-                            )}
-                          </td>
+                          {visibleColumns.vendorName && (
+                            <td className="py-4 px-6 font-semibold text-white max-w-[200px] truncate">
+                              {invoice.vendorName || (
+                                <span className="text-rose-400/80 italic flex items-center gap-1 text-xs">
+                                  <AlertTriangle className="w-3.5 h-3.5" /> Missing Vendor
+                                </span>
+                              )}
+                            </td>
+                          )}
+                          {visibleColumns.gstNumber && (
+                            <td className="py-4 px-4 font-mono text-xs text-slate-300">
+                              {invoice.gstNumber || (
+                                <span className="text-rose-400/80 italic flex items-center gap-1 text-xs font-sans">
+                                  <AlertTriangle className="w-3.5 h-3.5" /> Missing GSTIN
+                                </span>
+                              )}
+                            </td>
+                          )}
+                          {visibleColumns.customerName && (
+                            <td className="py-4 px-4 text-slate-300 max-w-[150px] truncate">
+                              {invoice.customerName || <span className="text-slate-500 italic text-xs">N/A</span>}
+                            </td>
+                          )}
+                          {visibleColumns.taxableSubtotal && (
+                            <td className="py-4 px-4 text-right font-medium text-slate-300">
+                              ₹{(invoice.total - invoice.totalGst).toLocaleString('en-IN', { minimumFractionDigits: 2 })}
+                            </td>
+                          )}
+                          {visibleColumns.totalGst && (
+                            <td className="py-4 px-4 text-right font-medium text-indigo-400">
+                              ₹{invoice.totalGst.toLocaleString('en-IN', { minimumFractionDigits: 2 })}
+                            </td>
+                          )}
+                          {visibleColumns.total && (
+                            <td className="py-4 px-4 text-right font-bold text-teal-400">
+                              ₹{invoice.total.toLocaleString('en-IN', { minimumFractionDigits: 2 })}
+                            </td>
+                          )}
+                          {visibleColumns.confidenceStatus && (
+                            <td className="py-4 px-4 text-center">
+                              {hasLowConfidence ? (
+                                <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-amber-500/10 text-amber-400 border border-amber-500/20">
+                                  <AlertCircle className="w-3 h-3" /> Review
+                                </span>
+                              ) : (
+                                <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-teal-500/10 text-teal-400 border border-teal-500/20">
+                                  <CheckCircle className="w-3 h-3" /> Confident
+                                </span>
+                              )}
+                            </td>
+                          )}
+                          {visibleColumns.createdAt && (
+                            <td className="py-4 px-4 text-center text-slate-300 text-xs">
+                              {invoice.createdAt ? new Date(invoice.createdAt).toLocaleDateString('en-IN', {
+                                day: '2-digit',
+                                month: 'short',
+                                year: 'numeric'
+                              }) : 'N/A'}
+                            </td>
+                          )}
                           <td className="py-4 px-6 text-center" onClick={(e) => e.stopPropagation()}>
                             <div className="flex justify-center items-center gap-2">
                               {isEditing ? (
@@ -799,7 +1059,7 @@ export default function Home() {
                         {/* Expandable Details Container */}
                         {isExpanded && (
                           <tr className="bg-slate-900/15">
-                            <td colSpan={8} className="px-6 py-6 border-b border-slate-900">
+                            <td colSpan={2 + Object.values(visibleColumns).filter(Boolean).length} className="px-6 py-6 border-b border-slate-900">
                               
                               {/* Edit Mode Panel */}
                               {isEditing && editingInvoice ? (
@@ -873,16 +1133,16 @@ export default function Home() {
                                               <td className="py-2 px-2 text-right">
                                                 <input 
                                                   type="number" 
-                                                  value={item.quantity}
-                                                  onChange={(e) => handleLineItemChange(idx, 'quantity', parseFloat(e.target.value) || 1)}
+                                                  value={item.quantity ?? ''}
+                                                  onChange={(e) => handleLineItemChange(idx, 'quantity', e.target.value)}
                                                   className="w-full bg-transparent border-b border-transparent focus:border-indigo-500 text-right py-0.5 focus:outline-none text-slate-200"
                                                 />
                                               </td>
                                               <td className="py-2 px-2 text-right">
                                                 <input 
                                                   type="number" 
-                                                  value={item.taxableValue}
-                                                  onChange={(e) => handleLineItemChange(idx, 'taxableValue', parseFloat(e.target.value) || 0)}
+                                                  value={item.taxableValue ?? ''}
+                                                  onChange={(e) => handleLineItemChange(idx, 'taxableValue', e.target.value)}
                                                   className="w-full bg-transparent border-b border-transparent focus:border-indigo-500 text-right py-0.5 focus:outline-none text-slate-200"
                                                 />
                                               </td>
