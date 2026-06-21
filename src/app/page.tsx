@@ -19,6 +19,7 @@ export default function Home() {
   const [tempApiKey, setTempApiKey] = useState<string>('');
   const [isDragging, setIsDragging] = useState<boolean>(false);
   const [apiErrorMessage, setApiErrorMessage] = useState<string | null>(null);
+  const [selectedModel, setSelectedModel] = useState<string>('gemini-3.5-flash');
   
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -32,10 +33,20 @@ export default function Home() {
         console.error('Failed to parse saved invoices:', e);
       }
     }
+
+    const savedModel = localStorage.getItem('putup_selected_model');
+    if (savedModel) {
+      setSelectedModel(savedModel);
+    }
     
     // Check if key is configured (either in env or local storage as fallback for ease of testing)
     checkApiKeyStatus();
   }, []);
+
+  const handleModelChange = (model: string) => {
+    setSelectedModel(model);
+    localStorage.setItem('putup_selected_model', model);
+  };
 
   const checkApiKeyStatus = async () => {
     try {
@@ -169,15 +180,15 @@ export default function Home() {
     formData.append('file', file);
 
     try {
-      // Add custom headers if API Key is set in local storage
+      // Add custom headers if API Key or Model selection is set
       const headers: Record<string, string> = {};
       const localKey = localStorage.getItem('GEMINI_API_KEY');
       
-      // We will proxy the call. If client key is set, we will append it in header or we will handle it in API
-      // Since Next.js runs both, let's pass a header 'x-gemini-key' if it exists.
-      // We will adjust our API route later to read from header if not in env! (Excellent for ease of setup!)
       if (localKey) {
         headers['x-gemini-key'] = localKey;
+      }
+      if (selectedModel) {
+        headers['x-gemini-model'] = selectedModel;
       }
 
       setUploadQueue(prev => prev.map(item => item.id === queueId ? { ...item, progress: 60 } : item));
@@ -509,6 +520,16 @@ export default function Home() {
           </div>
 
           <div className="flex items-center gap-3">
+            <select 
+              value={selectedModel}
+              onChange={(e) => handleModelChange(e.target.value)}
+              className="bg-slate-900 border border-slate-800 rounded-xl px-3 py-2 text-xs font-semibold text-slate-300 hover:bg-slate-800 focus:outline-none focus:border-indigo-500 cursor-pointer transition-all"
+              title="Select Gemini Extraction Model"
+            >
+              <option value="gemini-3.5-flash">⚡ Fast (3.5 Flash)</option>
+              <option value="gemini-1.5-pro">🎯 Accurate (1.5 Pro)</option>
+            </select>
+
             <button 
               onClick={loadMockInvoices}
               className="px-4 py-2 text-xs font-semibold bg-slate-900 border border-slate-800 hover:bg-slate-800 text-slate-300 rounded-xl transition-all flex items-center gap-1.5"

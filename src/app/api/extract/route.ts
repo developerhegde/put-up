@@ -60,11 +60,15 @@ export async function GET() {
 
 export async function POST(req: Request) {
   try {
-    // Extract API key from headers (client-side override) or fallback to environment variables
+    // Extract API key and model selection from headers (client-side override) or fallback to environment variables
     const headerKey = req.headers.get('x-gemini-key');
+    const headerModel = req.headers.get('x-gemini-model');
+    
     const apiKey = (headerKey && headerKey !== 'your_gemini_api_key_here') 
       ? headerKey 
       : process.env.GEMINI_API_KEY;
+
+    const modelName = headerModel === 'gemini-1.5-pro' ? 'gemini-1.5-pro' : 'gemini-3.5-flash';
 
     if (!apiKey || apiKey === 'your_gemini_api_key_here') {
       return NextResponse.json(
@@ -97,12 +101,13 @@ export async function POST(req: Request) {
     // Initialize Gemini API
     const genAI = new GoogleGenerativeAI(apiKey);
     
-    // Using gemini-3.5-flash which supports multimodal input and structured JSON response
+    // Using specified model (Flash for speed, Pro for frontier accuracy)
     const model = genAI.getGenerativeModel({
-      model: 'gemini-3.5-flash',
+      model: modelName,
       generationConfig: {
         responseMimeType: 'application/json',
         responseSchema: responseSchema,
+        temperature: 0.0, // Force deterministic output to maximize extraction accuracy
       },
     });
 
@@ -113,17 +118,16 @@ export async function POST(req: Request) {
       },
     };
 
-    const prompt = `Analyze this invoice and extract:
-1. Vendor / Company Name (the issuer of the invoice)
-2. GSTIN / GST Number of the vendor (look for a 15-character code starting with state code, e.g. 29ABCDE1234F1Z5)
-3. Customer name (the person or business the invoice is billed/consigned to)
-4. List of all line items. For each item, extract:
-   - Description or name of the item
-   - Quantity (default to 1 if not specified)
-   - Taxable value (total amount for this item before tax/GST)
-   - GST percentage rate (e.g. 5, 12, 18, 28, or 0 if exempt/no tax). If multiple tax rates are present, match each item with its corresponding tax rate.
-
-If a field is missing, illegible, or you are unsure, return null for vendorName, gstNumber, or customerName. Do not guess.`;
+    const prompt = `Analyze this invoice and extract the structured data. Follow these strict rules to ensure high-accuracy extraction:
+1. **Vendor Name:** Look at the top-left or header of the invoice. Identify the issuing company/vendor.
+2. **GSTIN / GST Number:** Search the header, footer, and tables. Indian GSTIN is a 15-character identifier (e.g. starting with state code like '29', '27', etc. and matching format like 29ABCDE1234F1Z5). If missing or unclear, return null.
+3. **Customer Name:** Identify the billed-to or consigned-to party (e.g., 'Bill To', 'Client Name', 'Billed To').
+4. **Line Items:** Extract ALL line items. For each item:
+   - **description:** Full item description or name.
+   - **quantity:** If not specified, default to 1.
+   - **taxableValue:** This MUST be the taxable value/subtotal of the item *before* tax/GST. If the invoice only lists the final item total including tax, calculate the taxable value by backing out the tax: taxableValue = Total / (1 + GST% / 100).
+   - **gstPercent:** The specific tax rate (e.g. 5, 12, 18, 28, or 0) applied to this specific line item. Check itemized tax tables or notes.
+5. **No Guessing:** If a value is unreadable, blurred, or missing, set the field to null instead of inventing values.`;
 
     const result = await model.generateContent([prompt, filePart]);
     const responseText = result.response.text();
