@@ -4,7 +4,8 @@ import React, { useState, useEffect, useRef } from 'react';
 import { 
   UploadCloud, FileText, Trash2, Download, ChevronDown, ChevronUp, 
   CheckCircle, AlertTriangle, FileSpreadsheet, Plus, Edit2, Save, 
-  X, RefreshCw, Key, AlertCircle, HelpCircle, Check, Database, Trash
+  X, RefreshCw, Key, AlertCircle, HelpCircle, Check, Database, Trash,
+  LogOut
 } from 'lucide-react';
 import { Invoice, RawInvoice, GstGroup, compileInvoice, roundTo2, RawLineItem } from '@/lib/gst-utils';
 import { exportInvoicesToExcel } from '@/lib/excel-export';
@@ -616,6 +617,16 @@ export default function Home() {
                 <Key className="w-3.5 h-3.5" /> Configure Gemini Key
               </button>
             )}
+
+            <form action="/api/logout" method="POST" className="inline-block">
+              <button 
+                type="submit"
+                className="px-4 py-2 text-xs font-semibold bg-slate-900 border border-slate-800 hover:bg-slate-850 hover:border-slate-700 hover:text-rose-400 text-slate-400 rounded-xl transition-all flex items-center gap-1.5"
+                title="Sign out of PutUp"
+              >
+                <LogOut className="w-3.5 h-3.5" /> Log Out
+              </button>
+            </form>
           </div>
         </header>
 
