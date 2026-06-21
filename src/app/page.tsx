@@ -20,6 +20,24 @@ export default function Home() {
   const [isDragging, setIsDragging] = useState<boolean>(false);
   const [apiErrorMessage, setApiErrorMessage] = useState<string | null>(null);
   const [selectedModel, setSelectedModel] = useState<string>('gemini-3.5-flash');
+
+  // Sorting State
+  const [sortField, setSortField] = useState<string>('createdAt');
+  const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('desc');
+
+  // Column Visibility State
+  const [visibleColumns, setVisibleColumns] = useState({
+    vendorName: true,
+    gstNumber: true,
+    customerName: true,
+    taxableSubtotal: true,
+    totalGst: true,
+    total: true,
+    confidenceStatus: true,
+    createdAt: true,
+  });
+
+  const [showColumnDropdown, setShowColumnDropdown] = useState<boolean>(false);
   
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -97,6 +115,48 @@ export default function Home() {
       setShowApiKeyPrompt(false);
       window.location.reload();
     }
+  };
+
+  // Sorting and Column Utilities
+  const handleSort = (field: string) => {
+    if (sortField === field) {
+      setSortOrder(sortOrder === 'asc' ? 'desc' : 'asc');
+    } else {
+      setSortField(field);
+      setSortOrder('asc');
+    }
+  };
+
+  const getSortedInvoices = () => {
+    return [...invoices].sort((a, b) => {
+      let valA: any = a[sortField as keyof Invoice];
+      let valB: any = b[sortField as keyof Invoice];
+
+      if (sortField === 'taxableSubtotal') {
+        valA = a.total - a.totalGst;
+        valB = b.total - b.totalGst;
+      }
+
+      if (valA === null || valA === undefined) return sortOrder === 'asc' ? 1 : -1;
+      if (valB === null || valB === undefined) return sortOrder === 'asc' ? -1 : 1;
+
+      if (typeof valA === 'string' && typeof valB === 'string') {
+        return sortOrder === 'asc' 
+          ? valA.localeCompare(valB) 
+          : valB.localeCompare(valA);
+      }
+
+      return sortOrder === 'asc' ? valA - valB : valB - valA;
+    });
+  };
+
+  const renderSortIcon = (field: string) => {
+    if (sortField !== field) {
+      return <span className="opacity-30 text-[9px] font-mono select-none">⇅</span>;
+    }
+    return sortOrder === 'asc' 
+      ? <span className="text-indigo-400 text-[10px] select-none">▲</span>
+      : <span className="text-indigo-400 text-[10px] select-none">▼</span>;
   };
 
   // Save invoices to local storage whenever they change
@@ -705,9 +765,48 @@ export default function Home() {
               <p className="text-slate-400 text-xs mt-0.5">Click any row to view full items breakdown and edit metadata</p>
             </div>
             
-            <div className="flex gap-2">
+            <div className="flex gap-2 relative">
               {invoices.length > 0 && (
                 <>
+                  <div className="relative">
+                    <button 
+                      onClick={() => setShowColumnDropdown(!showColumnDropdown)}
+                      className="px-4 py-2 text-xs font-semibold bg-slate-900 border border-slate-800 hover:bg-slate-800 text-slate-300 rounded-xl transition-all flex items-center gap-1.5"
+                    >
+                      Columns <ChevronDown className="w-3.5 h-3.5" />
+                    </button>
+                    {showColumnDropdown && (
+                      <div className="absolute right-0 mt-2 z-30 w-48 bg-slate-900 border border-slate-800 rounded-xl p-3 shadow-2xl space-y-2 select-none">
+                        <p className="text-[10px] font-bold text-slate-500 uppercase tracking-wider border-b border-slate-850 pb-1 mb-1">Show Columns</p>
+                        {Object.keys(visibleColumns).map((col) => {
+                          const labelMap: Record<string, string> = {
+                            vendorName: 'Vendor Name',
+                            gstNumber: 'Vendor GSTIN',
+                            customerName: 'Customer Name',
+                            taxableSubtotal: 'Taxable Subtotal',
+                            totalGst: 'Total GST',
+                            total: 'Grand Total',
+                            confidenceStatus: 'Confidence Status',
+                            createdAt: 'Date Scanned',
+                          };
+                          return (
+                            <label key={col} className="flex items-center gap-2 text-xs text-slate-300 cursor-pointer hover:text-slate-100 py-0.5">
+                              <input 
+                                type="checkbox" 
+                                checked={visibleColumns[col as keyof typeof visibleColumns]}
+                                onChange={() => setVisibleColumns({
+                                  ...visibleColumns,
+                                  [col]: !visibleColumns[col as keyof typeof visibleColumns]
+                                })}
+                                className="rounded border-slate-800 bg-slate-950 text-indigo-500 focus:ring-indigo-500 w-3.5 h-3.5"
+                              />
+                              {labelMap[col]}
+                            </label>
+                          );
+                        })}
+                      </div>
+                    )}
+                  </div>
                   <button 
                     onClick={() => {
                       if (confirm('Clear entire history? This cannot be undone.')) {
@@ -745,19 +844,93 @@ export default function Home() {
             <div className="overflow-x-auto">
               <table className="w-full text-left border-collapse">
                 <thead>
-                  <tr className="bg-slate-900/60 border-b border-slate-900 text-[11px] font-semibold text-slate-400 uppercase tracking-wider">
-                    <th className="py-4 px-6">Vendor Name</th>
-                    <th className="py-4 px-4">Vendor GSTIN</th>
-                    <th className="py-4 px-4">Customer Name</th>
-                    <th className="py-4 px-4 text-right">Taxable Subtotal</th>
-                    <th className="py-4 px-4 text-right">Total GST</th>
-                    <th className="py-4 px-4 text-right">Grand Total</th>
-                    <th className="py-4 px-4 text-center">Status</th>
+                  <tr className="bg-slate-900/60 border-b border-slate-900 text-[11px] font-semibold text-slate-400 uppercase tracking-wider select-none">
+                    <th className="py-4 px-4 text-center w-14">S.No.</th>
+                    {visibleColumns.vendorName && (
+                      <th 
+                        className="py-4 px-6 cursor-pointer hover:text-indigo-400 transition-colors"
+                        onClick={() => handleSort('vendorName')}
+                      >
+                        <div className="flex items-center gap-1">
+                          Vendor Name {renderSortIcon('vendorName')}
+                        </div>
+                      </th>
+                    )}
+                    {visibleColumns.gstNumber && (
+                      <th 
+                        className="py-4 px-4 cursor-pointer hover:text-indigo-400 transition-colors"
+                        onClick={() => handleSort('gstNumber')}
+                      >
+                        <div className="flex items-center gap-1">
+                          Vendor GSTIN {renderSortIcon('gstNumber')}
+                        </div>
+                      </th>
+                    )}
+                    {visibleColumns.customerName && (
+                      <th 
+                        className="py-4 px-4 cursor-pointer hover:text-indigo-400 transition-colors"
+                        onClick={() => handleSort('customerName')}
+                      >
+                        <div className="flex items-center gap-1">
+                          Customer Name {renderSortIcon('customerName')}
+                        </div>
+                      </th>
+                    )}
+                    {visibleColumns.taxableSubtotal && (
+                      <th 
+                        className="py-4 px-4 cursor-pointer hover:text-indigo-400 transition-colors text-right"
+                        onClick={() => handleSort('taxableSubtotal')}
+                      >
+                        <div className="flex items-center justify-end gap-1">
+                          Taxable Subtotal {renderSortIcon('taxableSubtotal')}
+                        </div>
+                      </th>
+                    )}
+                    {visibleColumns.totalGst && (
+                      <th 
+                        className="py-4 px-4 cursor-pointer hover:text-indigo-400 transition-colors text-right"
+                        onClick={() => handleSort('totalGst')}
+                      >
+                        <div className="flex items-center justify-end gap-1">
+                          Total GST {renderSortIcon('totalGst')}
+                        </div>
+                      </th>
+                    )}
+                    {visibleColumns.total && (
+                      <th 
+                        className="py-4 px-4 cursor-pointer hover:text-indigo-400 transition-colors text-right"
+                        onClick={() => handleSort('total')}
+                      >
+                        <div className="flex items-center justify-end gap-1">
+                          Grand Total {renderSortIcon('total')}
+                        </div>
+                      </th>
+                    )}
+                    {visibleColumns.confidenceStatus && (
+                      <th 
+                        className="py-4 px-4 cursor-pointer hover:text-indigo-400 transition-colors text-center"
+                        onClick={() => handleSort('confidenceStatus')}
+                      >
+                        <div className="flex items-center justify-center gap-1">
+                          Status {renderSortIcon('confidenceStatus')}
+                        </div>
+                      </th>
+                    )}
+                    {visibleColumns.createdAt && (
+                      <th 
+                        className="py-4 px-4 cursor-pointer hover:text-indigo-400 transition-colors text-center"
+                        onClick={() => handleSort('createdAt')}
+                      >
+                        <div className="flex items-center justify-center gap-1">
+                          Scan Date {renderSortIcon('createdAt')}
+                        </div>
+                      </th>
+                    )}
                     <th className="py-4 px-6 text-center">Actions</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-900 text-sm">
-                  {invoices.map((invoice) => {
+                  {getSortedInvoices().map((invoice, index) => {
                     const isExpanded = expandedInvoiceId === invoice.id;
                     const isEditing = editingInvoice?.id === invoice.id;
                     const hasLowConfidence = invoice.confidenceStatus === 'low_confidence';
@@ -775,43 +948,69 @@ export default function Home() {
                             isExpanded ? 'bg-slate-900/30' : ''
                           }`}
                         >
-                          <td className="py-4 px-6 font-semibold text-white max-w-[200px] truncate">
-                            {invoice.vendorName || (
-                              <span className="text-rose-400/80 italic flex items-center gap-1 text-xs">
-                                <AlertTriangle className="w-3.5 h-3.5" /> Missing Vendor
-                              </span>
-                            )}
+                          <td className="py-4 px-4 text-center text-slate-400 font-mono text-xs">
+                            {index + 1}
                           </td>
-                          <td className="py-4 px-4 font-mono text-xs text-slate-300">
-                            {invoice.gstNumber || (
-                              <span className="text-rose-400/80 italic flex items-center gap-1 text-xs font-sans">
-                                <AlertTriangle className="w-3.5 h-3.5" /> Missing GSTIN
-                              </span>
-                            )}
-                          </td>
-                          <td className="py-4 px-4 text-slate-300 max-w-[150px] truncate">
-                            {invoice.customerName || <span className="text-slate-500 italic text-xs">N/A</span>}
-                          </td>
-                          <td className="py-4 px-4 text-right font-medium text-slate-300">
-                            ₹{(invoice.total - invoice.totalGst).toLocaleString('en-IN', { minimumFractionDigits: 2 })}
-                          </td>
-                          <td className="py-4 px-4 text-right font-medium text-indigo-400">
-                            ₹{invoice.totalGst.toLocaleString('en-IN', { minimumFractionDigits: 2 })}
-                          </td>
-                          <td className="py-4 px-4 text-right font-bold text-teal-400">
-                            ₹{invoice.total.toLocaleString('en-IN', { minimumFractionDigits: 2 })}
-                          </td>
-                          <td className="py-4 px-4 text-center">
-                            {hasLowConfidence ? (
-                              <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-amber-500/10 text-amber-400 border border-amber-500/20">
-                                <AlertCircle className="w-3 h-3" /> Review
-                              </span>
-                            ) : (
-                              <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-teal-500/10 text-teal-400 border border-teal-500/20">
-                                <CheckCircle className="w-3 h-3" /> Confident
-                              </span>
-                            )}
-                          </td>
+                          {visibleColumns.vendorName && (
+                            <td className="py-4 px-6 font-semibold text-white max-w-[200px] truncate">
+                              {invoice.vendorName || (
+                                <span className="text-rose-400/80 italic flex items-center gap-1 text-xs">
+                                  <AlertTriangle className="w-3.5 h-3.5" /> Missing Vendor
+                                </span>
+                              )}
+                            </td>
+                          )}
+                          {visibleColumns.gstNumber && (
+                            <td className="py-4 px-4 font-mono text-xs text-slate-300">
+                              {invoice.gstNumber || (
+                                <span className="text-rose-400/80 italic flex items-center gap-1 text-xs font-sans">
+                                  <AlertTriangle className="w-3.5 h-3.5" /> Missing GSTIN
+                                </span>
+                              )}
+                            </td>
+                          )}
+                          {visibleColumns.customerName && (
+                            <td className="py-4 px-4 text-slate-300 max-w-[150px] truncate">
+                              {invoice.customerName || <span className="text-slate-500 italic text-xs">N/A</span>}
+                            </td>
+                          )}
+                          {visibleColumns.taxableSubtotal && (
+                            <td className="py-4 px-4 text-right font-medium text-slate-300">
+                              ₹{(invoice.total - invoice.totalGst).toLocaleString('en-IN', { minimumFractionDigits: 2 })}
+                            </td>
+                          )}
+                          {visibleColumns.totalGst && (
+                            <td className="py-4 px-4 text-right font-medium text-indigo-400">
+                              ₹{invoice.totalGst.toLocaleString('en-IN', { minimumFractionDigits: 2 })}
+                            </td>
+                          )}
+                          {visibleColumns.total && (
+                            <td className="py-4 px-4 text-right font-bold text-teal-400">
+                              ₹{invoice.total.toLocaleString('en-IN', { minimumFractionDigits: 2 })}
+                            </td>
+                          )}
+                          {visibleColumns.confidenceStatus && (
+                            <td className="py-4 px-4 text-center">
+                              {hasLowConfidence ? (
+                                <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-amber-500/10 text-amber-400 border border-amber-500/20">
+                                  <AlertCircle className="w-3 h-3" /> Review
+                                </span>
+                              ) : (
+                                <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-teal-500/10 text-teal-400 border border-teal-500/20">
+                                  <CheckCircle className="w-3 h-3" /> Confident
+                                </span>
+                              )}
+                            </td>
+                          )}
+                          {visibleColumns.createdAt && (
+                            <td className="py-4 px-4 text-center text-slate-300 text-xs">
+                              {invoice.createdAt ? new Date(invoice.createdAt).toLocaleDateString('en-IN', {
+                                day: '2-digit',
+                                month: 'short',
+                                year: 'numeric'
+                              }) : 'N/A'}
+                            </td>
+                          )}
                           <td className="py-4 px-6 text-center" onClick={(e) => e.stopPropagation()}>
                             <div className="flex justify-center items-center gap-2">
                               {isEditing ? (
@@ -849,7 +1048,7 @@ export default function Home() {
                         {/* Expandable Details Container */}
                         {isExpanded && (
                           <tr className="bg-slate-900/15">
-                            <td colSpan={8} className="px-6 py-6 border-b border-slate-900">
+                            <td colSpan={2 + Object.values(visibleColumns).filter(Boolean).length} className="px-6 py-6 border-b border-slate-900">
                               
                               {/* Edit Mode Panel */}
                               {isEditing && editingInvoice ? (
