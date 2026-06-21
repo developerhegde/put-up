@@ -38,30 +38,26 @@ export default function Home() {
   }, []);
 
   const checkApiKeyStatus = async () => {
-    // We will do a quick check if server has the API key
     try {
-      const res = await fetch('/api/extract', { method: 'HEAD' }); // Simple head request to verify
-      // In Next.js, we can also check if the user has stored a client-side override in localStorage
+      // In Next.js, we check if the user has stored a client-side override in localStorage
       const localKey = localStorage.getItem('GEMINI_API_KEY');
-      
       if (localKey) {
         setApiKeySet(true);
+        return;
+      }
+
+      // Check if server environment has the API key
+      const response = await fetch('/api/extract');
+      const data = await response.json();
+      if (data.configured) {
+        setApiKeySet(true);
       } else {
-        // We will ping a config endpoint or check response headers/status of a dummy call
-        const response = await fetch('/api/extract', {
-          method: 'POST',
-          body: new FormData() // Empty form data will fail with "No file uploaded" (400) or API Key error (400)
-        });
-        const data = await response.json();
-        if (data.error && data.error.includes('API Key is not configured')) {
-          setApiKeySet(false);
-          setShowApiKeyPrompt(true);
-        } else {
-          setApiKeySet(true);
-        }
+        setApiKeySet(false);
+        setShowApiKeyPrompt(true);
       }
     } catch (e) {
       setApiKeySet(false);
+      setShowApiKeyPrompt(true);
     }
   };
 
@@ -76,11 +72,20 @@ export default function Home() {
     }
   };
 
-  const handleClearApiKey = () => {
-    localStorage.removeItem('GEMINI_API_KEY');
-    setApiKeySet(false);
-    setTempApiKey('');
+  const handleOpenApiKeySettings = () => {
+    const savedKey = localStorage.getItem('GEMINI_API_KEY') || '';
+    setTempApiKey(savedKey);
     setShowApiKeyPrompt(true);
+  };
+
+  const handleClearApiKey = () => {
+    if (confirm('Are you sure you want to delete the saved Gemini API Key?')) {
+      localStorage.removeItem('GEMINI_API_KEY');
+      setApiKeySet(false);
+      setTempApiKey('');
+      setShowApiKeyPrompt(false);
+      window.location.reload();
+    }
   };
 
   // Save invoices to local storage whenever they change
@@ -289,6 +294,7 @@ export default function Home() {
     e.stopPropagation();
     // Clone invoice to avoid mutating state directly
     setEditingInvoice(JSON.parse(JSON.stringify(invoice)));
+    setExpandedInvoiceId(invoice.id);
   };
 
   const handleHeaderChange = (field: keyof Invoice, value: string | null) => {
@@ -411,6 +417,16 @@ export default function Home() {
           <div className="bg-slate-900 border border-slate-800 rounded-2xl w-full max-w-md p-6 shadow-2xl relative overflow-hidden">
             <div className="absolute top-0 left-0 right-0 h-1.5 bg-gradient-to-r from-indigo-500 via-purple-500 to-pink-500" />
             
+            {apiKeySet && (
+              <button 
+                onClick={() => setShowApiKeyPrompt(false)} 
+                className="absolute top-4 right-4 text-slate-500 hover:text-slate-300 p-1 hover:bg-slate-800 rounded-lg transition-all"
+                title="Close"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            )}
+
             <div className="flex items-center space-x-3 mb-4">
               <div className="p-2 bg-indigo-500/10 text-indigo-400 rounded-lg">
                 <Key className="w-5 h-5" />
@@ -437,19 +453,32 @@ export default function Home() {
               </span>
             </div>
 
-            <div className="flex gap-3 justify-end">
-              <button 
-                onClick={() => setShowApiKeyPrompt(false)} 
-                className="px-4 py-2 text-sm text-slate-400 hover:text-slate-200 hover:bg-slate-800 rounded-xl transition-all"
-              >
-                Skip / Demo Mode
-              </button>
-              <button 
-                onClick={handleSaveApiKey}
-                className="px-5 py-2.5 text-sm bg-gradient-to-r from-indigo-500 to-purple-600 hover:from-indigo-600 hover:to-purple-700 text-white font-medium rounded-xl shadow-lg shadow-indigo-500/25 transition-all"
-              >
-                Save API Key
-              </button>
+            <div className="flex gap-3 justify-between items-center">
+              {apiKeySet ? (
+                <button 
+                  onClick={handleClearApiKey}
+                  className="px-3 py-2 text-xs font-semibold text-rose-400 hover:text-rose-300 hover:bg-rose-500/10 rounded-xl transition-all"
+                >
+                  Delete Key
+                </button>
+              ) : (
+                <div />
+              )}
+
+              <div className="flex gap-3">
+                <button 
+                  onClick={() => setShowApiKeyPrompt(false)} 
+                  className="px-4 py-2 text-sm text-slate-400 hover:text-slate-200 hover:bg-slate-800 rounded-xl transition-all"
+                >
+                  {apiKeySet ? 'Cancel' : 'Skip / Demo Mode'}
+                </button>
+                <button 
+                  onClick={handleSaveApiKey}
+                  className="px-5 py-2.5 text-sm bg-gradient-to-r from-indigo-500 to-purple-600 hover:from-indigo-600 hover:to-purple-700 text-white font-medium rounded-xl shadow-lg shadow-indigo-500/25 transition-all"
+                >
+                  Save API Key
+                </button>
+              </div>
             </div>
           </div>
         </div>
@@ -492,8 +521,8 @@ export default function Home() {
                 <div className="w-2 h-2 bg-teal-500 rounded-full animate-pulse" />
                 <span className="text-xs text-slate-300 font-medium">Gemini Connected</span>
                 <button 
-                  onClick={handleClearApiKey}
-                  className="text-xs text-slate-500 hover:text-rose-400 font-semibold ml-2 border-l border-slate-800 pl-2 transition-colors"
+                  onClick={handleOpenApiKeySettings}
+                  className="text-xs text-slate-500 hover:text-indigo-400 font-semibold ml-2 border-l border-slate-800 pl-2 transition-colors"
                 >
                   Change Key
                 </button>
@@ -873,16 +902,16 @@ export default function Home() {
                                               <td className="py-2 px-2 text-right">
                                                 <input 
                                                   type="number" 
-                                                  value={item.quantity}
-                                                  onChange={(e) => handleLineItemChange(idx, 'quantity', parseFloat(e.target.value) || 1)}
+                                                  value={item.quantity ?? ''}
+                                                  onChange={(e) => handleLineItemChange(idx, 'quantity', e.target.value)}
                                                   className="w-full bg-transparent border-b border-transparent focus:border-indigo-500 text-right py-0.5 focus:outline-none text-slate-200"
                                                 />
                                               </td>
                                               <td className="py-2 px-2 text-right">
                                                 <input 
                                                   type="number" 
-                                                  value={item.taxableValue}
-                                                  onChange={(e) => handleLineItemChange(idx, 'taxableValue', parseFloat(e.target.value) || 0)}
+                                                  value={item.taxableValue ?? ''}
+                                                  onChange={(e) => handleLineItemChange(idx, 'taxableValue', e.target.value)}
                                                   className="w-full bg-transparent border-b border-transparent focus:border-indigo-500 text-right py-0.5 focus:outline-none text-slate-200"
                                                 />
                                               </td>

@@ -61,8 +61,8 @@ export function compileInvoice(
   const groupsMap: { [percent: number]: { taxableValue: number; gstAmount: number } } = {};
   
   lineItems.forEach((item) => {
-    const percent = roundTo2(item.gstPercent || 0);
-    const taxable = roundTo2(item.taxableValue || 0);
+    const percent = roundTo2(Number(item.gstPercent) || 0);
+    const taxable = roundTo2(Number(item.taxableValue) || 0);
     const itemGst = roundTo2(taxable * (percent / 100));
     
     if (!groupsMap[percent]) {

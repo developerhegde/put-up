@@ -52,6 +52,12 @@ const responseSchema: any = {
   required: ["lineItems"]
 };
 
+export async function GET() {
+  const apiKey = process.env.GEMINI_API_KEY;
+  const isConfigured = !!apiKey && apiKey !== 'your_gemini_api_key_here';
+  return NextResponse.json({ configured: isConfigured });
+}
+
 export async function POST(req: Request) {
   try {
     // Extract API key from headers (client-side override) or fallback to environment variables
